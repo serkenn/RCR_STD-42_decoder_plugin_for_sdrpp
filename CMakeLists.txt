@@ -59,7 +59,10 @@ else ()
     endif ()
 endif ()
 
-file(GLOB_RECURSE SRC "src/*.cpp")
+# CONFIGURE_DEPENDS re-runs the glob on every build, so a newly added source
+# file is picked up without a manual reconfigure. The post-build check below is
+# the backstop for the case where even that fails.
+file(GLOB_RECURSE SRC CONFIGURE_DEPENDS "src/*.cpp")
 
 add_library(${PROJECT_NAME} SHARED ${SRC})
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "")
@@ -114,5 +117,15 @@ else ()
     target_link_options(${PROJECT_NAME} PRIVATE
         -Wl,--unresolved-symbols=ignore-in-object-files)
 endif ()
+
+# The permissive link flags above let sdrpp_core symbols stay unresolved — and
+# would just as happily let a missing source file through, which shows up only
+# as a jump to address 0 once SDR++ loads the module. Verify after every link
+# that the library defines everything in its own namespace.
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-undefined.sh"
+            "$<TARGET_FILE:${PROJECT_NAME}>"
+    VERBATIM
+    COMMENT "Checking that no std42:: symbol was left undefined")
 
 install(TARGETS ${PROJECT_NAME} DESTINATION lib/sdrpp/plugins)

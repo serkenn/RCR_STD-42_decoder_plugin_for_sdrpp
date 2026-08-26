@@ -9,6 +9,20 @@
 // (alpha) and the rate estimate (beta).  Tracking the rate as well as the
 // phase absorbs the transmitter/receiver clock difference over the long
 // message batches STD-42 sends.
+//
+// Three details matter for real signals, as opposed to a clean synthetic one:
+//
+//   * The rate correction is *relative*.  A timing error of e symbol periods
+//     per symbol implies a fractional rate error of about e, so the update has
+//     to scale with the current rate.  An absolute step would be enormous at
+//     512 Bd (where one symbol is ~94 samples) and would slam the estimate
+//     into its clamp on the first noisy crossing.
+//   * Crossings are gated by hysteresis.  Between transmissions the
+//     discriminator emits noise that crosses zero constantly; without a
+//     minimum excursion requirement that noise drives the loop.
+//   * The rate estimate leaks back toward nominal.  A real signal's consistent
+//     error easily overcomes the leak, but noise cannot park the estimate at a
+//     clamp and hold it there.
 
 #include "demod/types.h"
 
@@ -20,9 +34,11 @@ class BitSync {
 public:
     void configure(double sample_rate, double symbol_rate) {
         nominal_ = symbol_rate / sample_rate;      // symbols per sample
-        // Allow ±2 % clock error, comfortably more than any real transmitter.
-        freq_min_ = nominal_ * 0.98;
-        freq_max_ = nominal_ * 1.02;
+        // Wide enough to pull in a transmitter whose symbol clock is not quite
+        // what we assumed, which also makes the readout a usable measurement
+        // of the signal's actual rate.
+        freq_min_ = nominal_ * 0.94;
+        freq_max_ = nominal_ * 1.06;
         reset();
     }
 
@@ -31,12 +47,16 @@ public:
         phase_ = 0.0;
         prev_ = 0.0f;
         armed_ = true;
+        swung_high_ = false;
+        swung_low_ = false;
         timing_err_ = 0.0;
     }
 
-    // Feeds one centred sample. Returns true (and writes `out`) at each
-    // mid-symbol sampling instant.
-    bool process(float x, float& out) {
+    // Feeds one centred sample. `hysteresis` is the minimum excursion either
+    // side of zero that must be seen before the next crossing is believed —
+    // pass a fraction of the tracked deviation, or 0 to accept every crossing.
+    // Returns true (and writes `out`) at each mid-symbol sampling instant.
+    bool process(float x, float hysteresis, float& out) {
         bool emitted = false;
 
         const double p0 = phase_;
@@ -50,21 +70,38 @@ public:
             emitted = true;
         }
 
-        // Timing error from the zero crossing, if there is one.
-        if ((prev_ < 0.0f) != (x < 0.0f) && prev_ != x) {
-            const double frac =
-                static_cast<double>(prev_) / (static_cast<double>(prev_) - x);
-            double e = p0 + freq_ * frac;                // phase at the crossing
-            e -= std::floor(e);                          // wrap to [0,1)
-            if (e >= 0.5) e -= 1.0;                      // wrap to [-0.5,0.5)
+        // Track whether the signal has genuinely been to both rails since the
+        // last accepted crossing.
+        if (x > hysteresis) swung_high_ = true;
+        if (x < -hysteresis) swung_low_ = true;
 
-            phase_ -= kAlpha * e;
-            freq_ = clampd(freq_ - kBeta * e, freq_min_, freq_max_);
-            timing_err_ += (std::fabs(e) - timing_err_) * 0.02;
+        // Timing error from the zero crossing, if there is a believable one.
+        if ((prev_ < 0.0f) != (x < 0.0f) && prev_ != x) {
+            const bool rising = (x >= 0.0f);
+            const bool believable = rising ? swung_low_ : swung_high_;
+            if (believable) {
+                if (rising) swung_low_ = false; else swung_high_ = false;
+
+                const double frac =
+                    static_cast<double>(prev_) / (static_cast<double>(prev_) - x);
+                double e = p0 + freq_ * frac;            // phase at the crossing
+                e -= std::floor(e);                      // wrap to [0,1)
+                if (e >= 0.5) e -= 1.0;                  // wrap to [-0.5,0.5)
+
+                phase_ -= kAlpha * e;
+                // Relative rate correction — see the note above.
+                freq_ = clampd(freq_ * (1.0 - kBeta * e), freq_min_, freq_max_);
+                timing_err_ += (std::fabs(e) - timing_err_) * 0.02;
+            }
         }
 
-        // Wrap; a new symbol period re-arms the sampler.
-        if (phase_ >= 1.0) { phase_ -= 1.0; armed_ = true; }
+        // Wrap; a new symbol period re-arms the sampler and leaks the rate
+        // estimate a little way back toward nominal.
+        if (phase_ >= 1.0) {
+            phase_ -= 1.0;
+            armed_ = true;
+            freq_ += (nominal_ - freq_) * kLeak;
+        }
         else if (phase_ < 0.0) { phase_ += 1.0; }
 
         prev_ = x;
@@ -79,10 +116,11 @@ public:
     double timing_error() const { return timing_err_; }
 
 private:
-    // Critically-damped-ish loop: fast enough to pull in within the 576-bit
-    // preamble, slow enough not to be dragged around by noise crossings.
+    // Fast enough to pull in within the 576-bit preamble, slow enough not to be
+    // dragged around by the crossings that survive the hysteresis gate.
     static constexpr double kAlpha = 0.10;
-    static constexpr double kBeta  = 0.002;
+    static constexpr double kBeta  = 0.010;   // relative, per accepted crossing
+    static constexpr double kLeak  = 0.0005;  // per symbol, toward nominal
 
     double nominal_ = 0.0;
     double freq_ = 0.0;
@@ -92,6 +130,8 @@ private:
     double timing_err_ = 0.0;
     float prev_ = 0.0f;
     bool armed_ = true;
+    bool swung_high_ = false;
+    bool swung_low_ = false;
 };
 
 } // namespace std42::demod

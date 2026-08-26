@@ -47,8 +47,10 @@ int FskChain::process(float freq_hz) {
         EyePoint{static_cast<float>(sync_.phase()), clampf(norm, -2.0f, 2.0f)};
     eye_write_.store((w + 1) % kEyeCapacity, std::memory_order_release);
 
+    // Require a third of the tracked deviation of excursion before believing a
+    // zero crossing, so inter-burst noise does not drive the timing loop.
     float sym = 0.0f;
-    if (!sync_.process(centred, sym)) return -1;
+    if (!sync_.process(centred, dev * 0.33f, sym)) return -1;
 
     symbols_.fetch_add(1, std::memory_order_relaxed);
 

@@ -11,6 +11,7 @@
 #include <dsp/types.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -26,6 +27,7 @@
 #include "pocsag/receiver.h"
 #include "sink/call_json.h"
 #include "sink/file_sink.h"
+#include "sink/iq_recorder.h"
 #include "sink/tcp_sink.h"
 #include "ui/eye_view.h"
 #include "ui/jp_font.h"
@@ -137,12 +139,14 @@ public:
         tcp_enabled_     = c.value("jsonlTcpEnabled", false);
         tcp_port_        = c.value("jsonlTcpPort", 7356);
         font_path_       = c.value("japaneseFontPath", std::string());
+        iq_path_         = c.value("iqCapturePath", default_dir + "/capture.wav");
         config.release(true);
 
         copy_to_buf(text_log_path_, text_log_buf_, sizeof(text_log_buf_));
         copy_to_buf(jsonl_path_, jsonl_buf_, sizeof(jsonl_buf_));
         copy_to_buf(address_filter_, address_filter_buf_, sizeof(address_filter_buf_));
         copy_to_buf(font_path_, font_buf_, sizeof(font_buf_));
+        copy_to_buf(iq_path_, iq_buf_, sizeof(iq_buf_));
 
         filter_set_ = parse_address_filter(address_filter_);
 
@@ -179,6 +183,8 @@ public:
             sink_.stop();
             sigpath::vfoManager.deleteVFO(vfo_);
         }
+        iq_recorder_.store(nullptr, std::memory_order_release);
+        if (iq_owner_)   iq_owner_->stop();
         if (text_sink_)  text_sink_->stop();
         if (jsonl_sink_) jsonl_sink_->stop();
         if (tcp_sink_)   tcp_sink_->stop();
@@ -213,6 +219,9 @@ private:
     static void iq_handler(dsp::complex_t* data, int count, void* ctx) {
         auto* self = static_cast<Std42DecoderModule*>(ctx);
         if (!self->enabled_ || !self->recv_) return;
+        if (auto* rec = self->iq_recorder_.load(std::memory_order_acquire)) {
+            rec->write(reinterpret_cast<const float*>(data), count);
+        }
         self->recv_->process(
             reinterpret_cast<const std42::demod::Complex32*>(data), count);
     }
@@ -569,6 +578,39 @@ private:
             }
         }
 
+        // Baseband capture, for working out why a signal demodulates but never
+        // frames. Written at the decoder's own 48 kHz working rate.
+        ImGui::Separator();
+        bool rec_on = iq_recorder_.load(std::memory_order_acquire) != nullptr;
+        if (ImGui::Checkbox(("Record IQ (48 kHz WAV)##iqrec_" + name_).c_str(), &rec_on)) {
+            if (rec_on && !iq_path_.empty()) {
+                auto rec = std::make_unique<std42::sink::IqRecorder>(
+                    iq_path_, kInputSampleRate);
+                iq_recorder_.store(rec.get(), std::memory_order_release);
+                iq_owner_ = std::move(rec);
+            } else {
+                iq_recorder_.store(nullptr, std::memory_order_release);
+                if (iq_owner_) { iq_owner_->stop(); iq_owner_.reset(); }
+            }
+        }
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::InputText(("##iqpath_" + name_).c_str(), iq_buf_, sizeof(iq_buf_),
+                             ImGuiInputTextFlags_EnterReturnsTrue) ||
+            ImGui::IsItemDeactivatedAfterEdit()) {
+            iq_path_ = iq_buf_;
+            save_field("iqCapturePath", iq_path_);
+        }
+        if (iq_owner_) {
+            const auto s2 = iq_owner_->snapshot();
+            if (!s2.error_message.empty()) {
+                ImGui::TextColored(ImVec4(0.8f, 0.3f, 0.3f, 1.0f), "%s",
+                                   s2.error_message.c_str());
+            } else {
+                ImGui::TextDisabled("%.1f s captured (%lld samples)",
+                                    s2.seconds, s2.frames);
+            }
+        }
+
         // Japanese font. The ImGui atlas can only be rebuilt before the render
         // loop starts, so a new path is picked up at the next start.
         ImGui::Separator();
@@ -605,6 +647,11 @@ private:
     std::unique_ptr<std42::sink::FileLineSink> jsonl_sink_;
     std::unique_ptr<std42::sink::TcpJsonlSink> tcp_sink_;
 
+    // Published to the DSP thread with release/acquire so a capture can be
+    // started and stopped without locking the audio path.
+    std::unique_ptr<std42::sink::IqRecorder> iq_owner_;
+    std::atomic<std42::sink::IqRecorder*> iq_recorder_{nullptr};
+
     std42::ui::EyeView eye_;
     std42::ui::Sparkline spark_offset_;
     std42::ui::Sparkline spark_deviation_;
@@ -617,6 +664,7 @@ private:
     std::string text_log_path_;
     std::string jsonl_path_;
     std::string font_path_;
+    std::string iq_path_;
     int tcp_port_ = 7356;
     bool text_log_enabled_ = false;
     bool jsonl_enabled_ = false;
@@ -626,6 +674,7 @@ private:
     char text_log_buf_[512] = {};
     char jsonl_buf_[512] = {};
     char font_buf_[512] = {};
+    char iq_buf_[512] = {};
 
     std::mutex ui_mtx_;
     std::deque<CallRecord> recent_;
