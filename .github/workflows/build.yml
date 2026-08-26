@@ -1,0 +1,151 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # the release job attaches assets
+
+jobs:
+  # ── Decoder self-test ───────────────────────────────────────────────────────
+  # Synthesises an STD-42 transmission, modulates it to complex baseband and
+  # checks the recovered text. Needs no SDR++ headers.
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run self-test
+        run: bash tests/run.sh
+
+      - name: Verify the Shift-JIS table is in sync with its generator
+        run: |
+          python3 scripts/gen_sjis_table.py
+          git diff --exit-code src/pocsag/sjis_table.cpp
+
+  # ── macOS (universal: Apple Silicon + Intel) ───────────────────────────────
+  # Built on an Apple Silicon runner as a single universal binary. Nothing
+  # architecture-specific is linked — the SDR++ headers are arch-independent and
+  # sdrpp_core resolves at load time — so one artefact serves both Macs.
+  macos:
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDR++ header dependencies
+        # Headers only — volk / fftw3 / glfw are included by SDR++ core headers
+        # but never linked.
+        run: brew install volk fftw glfw ninja
+
+      - name: Fetch SDR++ source (headers only)
+        run: bash scripts/fetch-sdrpp.sh
+
+      - name: Configure
+        run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Collect artefact
+        run: |
+          set -eux
+          mkdir -p dist
+          cp build/rcr_std42_decoder.dylib dist/rcr_std42_decoder-macos-universal.dylib
+          file dist/rcr_std42_decoder-macos-universal.dylib
+          # Fail loudly if either slice went missing.
+          lipo -archs dist/rcr_std42_decoder-macos-universal.dylib | tee /dev/stderr | grep -q arm64
+          lipo -archs dist/rcr_std42_decoder-macos-universal.dylib | grep -q x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: dist/rcr_std42_decoder-macos-universal.dylib
+          if-no-files-found: error
+
+  # ── Linux (x86_64 native, ARM64 cross) ─────────────────────────────────────
+  linux:
+    needs: test
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            apt: ""
+            toolchain: ""
+            cflags: ""
+          - target: linux-aarch64
+            apt: "gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"
+            toolchain: "cmake/toolchains/linux-aarch64.cmake"
+            # SDR++ headers pull in <fftw3.h> / <volk/*.h> / <GLFW/glfw3.h>.
+            # They are header-only for us, so let the cross compiler fall back
+            # to the amd64 copies at the lowest priority without disturbing its
+            # own libc headers.
+            cflags: "-idirafter /usr/include"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates \
+            libfftw3-dev libvolk-dev libglfw3-dev libzstd-dev ${{ matrix.apt }}
+
+      - name: Fetch SDR++ source (headers only)
+        run: bash scripts/fetch-sdrpp.sh
+
+      - name: Configure
+        run: |
+          set -eux
+          ARGS=(-G Ninja -DCMAKE_BUILD_TYPE=Release)
+          if [ -n "${{ matrix.toolchain }}" ]; then
+            ARGS+=(-DCMAKE_TOOLCHAIN_FILE="$PWD/${{ matrix.toolchain }}")
+          fi
+          if [ -n "${{ matrix.cflags }}" ]; then
+            ARGS+=(-DCMAKE_C_FLAGS="${{ matrix.cflags }}" -DCMAKE_CXX_FLAGS="${{ matrix.cflags }}")
+          fi
+          cmake -B build -S . "${ARGS[@]}"
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Collect artefact
+        run: |
+          set -eux
+          mkdir -p dist
+          cp build/rcr_std42_decoder.so "dist/rcr_std42_decoder-${{ matrix.target }}.so"
+          file "dist/rcr_std42_decoder-${{ matrix.target }}.so"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/rcr_std42_decoder-${{ matrix.target }}.so
+          if-no-files-found: error
+
+  # ── Publish a Release with every binary when a v* tag is pushed ────────────
+  release:
+    needs: [macos, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artefacts
+        run: find artifacts -type f \( -name '*.so' -o -name '*.dylib' \) -print
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.so
+            artifacts/**/*.dylib
+          generate_release_notes: true
+          fail_on_unmatched_files: true
