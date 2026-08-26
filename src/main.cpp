@@ -320,19 +320,19 @@ private:
         } else if (locked) {
             lamp = IM_COL32(70, 180, 85, 255);
             char b[64];
-            std::snprintf(b, sizeof(b), "Locked — %d bps%s",
+            std::snprintf(b, sizeof(b), "Locked - %d bps%s",
                           static_cast<int>(recv_->active_baud() + 0.5),
                           recv_->inverted() ? " (inverted)" : "");
             label = b;
         } else if (preamble) {
             lamp = IM_COL32(220, 170, 40, 255);
-            label = "Preamble — acquiring";
+            label = "Preamble - acquiring";
         } else if (recv_ && recv_->idle_pattern()) {
             // Not a fault: the channel is up and carrying its between-calls
             // idle pattern. Green, because there is nothing to fix.
             lamp = IM_COL32(70, 180, 85, 255);
             char b[80];
-            std::snprintf(b, sizeof(b), "Channel idle — %d bps 1010 pattern",
+            std::snprintf(b, sizeof(b), "Channel idle - %d bps 1010 pattern",
                           static_cast<int>(recv_->idle_pattern_rate() + 0.5));
             label = b;
         } else if (dev > 1500.0f) {
@@ -383,7 +383,13 @@ private:
         const ImU32 q_col = quality > 90.0 ? IM_COL32(70, 180, 85, 255)
                           : quality > 50.0 ? IM_COL32(220, 170, 40, 255)
                                            : IM_COL32(200, 70, 70, 255);
-        std::snprintf(buf, sizeof(buf), "%.0f %%", quality);
+        // Say what the number is derived from; "0 %" on an idle channel used
+        // to read as a fault rather than as "nothing is being sent".
+        const char* q_src = !recv_               ? ""
+                          : recv_->locked()      ? " codeword"
+                          : recv_->idle_pattern() ? " idle"
+                                                  : "";
+        std::snprintf(buf, sizeof(buf), "%.0f %%%s", quality, q_src);
         spark_quality_.draw("Quality", buf, q_col, cap_w);
 
         ImGui::TextDisabled("Eye opening %.1f   symbol clock %.1f Bd",
@@ -393,7 +399,7 @@ private:
             // Surface the measurement, so an unexpected idle rate is visible
             // rather than looking like a decoder failure.
             ImGui::TextDisabled("Channel activity: %.0f bps 1010 pattern "
-                                "(regularity %.2f) — not POCSAG",
+                                "(regularity %.2f) - not POCSAG",
                                 recv_->idle_pattern_rate(),
                                 recv_->idle_pattern_regularity());
         }
@@ -482,7 +488,7 @@ private:
                             latest.format.c_str());
         if (latest.bad_codewords > 0) {
             ImGui::TextColored(ImVec4(0.86f, 0.67f, 0.16f, 1.0f),
-                               "%d codeword(s) lost — message may be incomplete",
+                               "%d codeword(s) lost - message may be incomplete",
                                latest.bad_codewords);
         }
 
@@ -589,7 +595,7 @@ private:
                 ImGui::TextColored(ImVec4(0.8f, 0.3f, 0.3f, 1.0f), "%s",
                                    s.error_message.c_str());
             } else {
-                ImGui::TextDisabled("127.0.0.1:%d — %d client(s), %lld sent",
+                ImGui::TextDisabled("127.0.0.1:%d - %d client(s), %lld sent",
                                     s.port, s.client_count, s.records_sent);
             }
         }

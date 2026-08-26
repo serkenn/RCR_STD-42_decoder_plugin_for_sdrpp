@@ -49,8 +49,13 @@ void EyeView::accumulate(int n) {
         const double nm = neg_sum / neg_n;
         const double ps = std::sqrt(std::max(0.0, pos_sq / pos_n - pm * pm));
         const double ns = std::sqrt(std::max(0.0, neg_sq / neg_n - nm * nm));
-        const double spread = ps + ns;
-        const double v = (spread > 1e-6) ? (pm - nm) / spread : 0.0;
+        // The samples are normalised to roughly +-1, so a 1e-6 floor was far
+        // too small to be a guard: an unusually consistent cluster drove the
+        // ratio to ~1e7 and the panel printed "Eye opening 11175708.4". Floor
+        // the spread at a fraction of the unit amplitude and cap the result,
+        // since anything past ~10 is already a wide-open eye.
+        const double spread = std::max(ps + ns, 0.02);
+        const double v = std::min((pm - nm) / spread, 20.0);
         opening_ += (v - opening_) * 0.15;      // smooth the readout
     }
 }

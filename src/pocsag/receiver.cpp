@@ -216,13 +216,24 @@ double Receiver::quality() const {
                            ? static_cast<size_t>(i) : 0;
     const Chain& c = *chains_[idx];
 
-    if (c.framer->state() != FramerState::Locked) {
-        // Not framed: report how open the eye is, so the user still has
-        // something to tune against.
-        return c.framer->preamble() ? 0.25 : 0.0;
+    if (c.framer->state() == FramerState::Locked) {
+        // Framed: the rejected-codeword rate is the authoritative measure.
+        return std::clamp(1.0 - c.framer->codeword_error_rate(), 0.0, 1.0);
     }
-    const double err = c.framer->codeword_error_rate();
-    return std::clamp(1.0 - err, 0.0, 1.0);
+
+    // Not framed. Reporting 0 here was actively misleading: a municipal
+    // channel is idle almost all of the time, so a perfectly clean, strong
+    // signal read "Quality 0 %" and looked like a reception problem. What the
+    // user needs between calls is how cleanly the bit stream is being
+    // recovered, and the regularity of the idle pattern's zero crossings
+    // measures exactly that — it degrades with noise the same way.
+    //
+    // pattern_ is read directly rather than through is_idle_pattern(), which
+    // would take gate_ again; it is already held here.
+    if (pattern_.is_idle_pattern()) {
+        return std::clamp(pattern_.regularity(), 0.0, 1.0);
+    }
+    return c.framer->preamble() ? 0.25 : 0.0;
 }
 
 long long Receiver::symbols() const {

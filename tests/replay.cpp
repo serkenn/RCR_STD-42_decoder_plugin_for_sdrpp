@@ -54,12 +54,12 @@ int main(int argc, char** argv) {
         const double t = double(total) / rate;
         if (t >= next_report) {
             next_report += 5.0;
-            std::printf("t=%6.1fs  idle=%-3s rate=%6.1f bps  reg=%.2f  dev=%5.0f Hz  "
-                        "locked=%-3s batches=%lld\n",
+            std::printf("t=%6.1fs  idle=%-3s rate=%6.1f bps  reg=%.2f  "
+                        "quality=%3.0f%%  locked=%-3s batches=%lld\n",
                         t, rx.idle_pattern() ? "yes" : "no",
                         rx.idle_pattern_rate(), rx.idle_pattern_regularity(),
-                        rx.deviation(), rx.locked() ? "yes" : "no",
-                        rx.stats().batches);
+                        rx.quality() * 100.0,
+                        rx.locked() ? "yes" : "no", rx.stats().batches);
         }
     }
     std::fclose(f);
