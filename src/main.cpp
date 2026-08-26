@@ -327,6 +327,14 @@ private:
         } else if (preamble) {
             lamp = IM_COL32(220, 170, 40, 255);
             label = "Preamble — acquiring";
+        } else if (recv_ && recv_->idle_pattern()) {
+            // Not a fault: the channel is up and carrying its between-calls
+            // idle pattern. Green, because there is nothing to fix.
+            lamp = IM_COL32(70, 180, 85, 255);
+            char b[80];
+            std::snprintf(b, sizeof(b), "Channel idle — %d bps 1010 pattern",
+                          static_cast<int>(recv_->idle_pattern_rate() + 0.5));
+            label = b;
         } else if (dev > 1500.0f) {
             lamp = IM_COL32(220, 170, 40, 255);
             label = "Signal, no frame sync";
@@ -381,6 +389,14 @@ private:
         ImGui::TextDisabled("Eye opening %.1f   symbol clock %.1f Bd",
                             eye_.opening(),
                             recv_ ? recv_->recovered_baud() : 0.0);
+        if (recv_ && recv_->idle_pattern()) {
+            // Surface the measurement, so an unexpected idle rate is visible
+            // rather than looking like a decoder failure.
+            ImGui::TextDisabled("Channel activity: %.0f bps 1010 pattern "
+                                "(regularity %.2f) — not POCSAG",
+                                recv_->idle_pattern_rate(),
+                                recv_->idle_pattern_regularity());
+        }
     }
 
     void draw_decoder_settings() {

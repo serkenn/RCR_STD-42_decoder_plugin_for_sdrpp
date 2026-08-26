@@ -34,6 +34,7 @@ Receiver::Receiver(double sample_rate, Handler on_call)
     : sample_rate_(sample_rate), on_call_(std::move(on_call)) {
     bch_init();
     fm_.configure(sample_rate_);
+    pattern_.configure(sample_rate_);
     std::lock_guard<std::mutex> lk(gate_);
     rebuild_chains_locked();
 }
@@ -77,6 +78,7 @@ void Receiver::process(const demod::Complex32* data, int count) {
         // The discriminator is baud-independent, so it runs once for all
         // candidate chains.
         const float hz = fm_.process(data[i]);
+        pattern_.process(hz);
         for (auto& c : chains_) {
             const int bit = c->chain.process(hz);
             if (bit >= 0) c->framer->process_bit(bit);
@@ -189,6 +191,21 @@ double Receiver::codeword_error_rate() const {
     const int i = active_.load(std::memory_order_relaxed);
     if (i < 0 || static_cast<size_t>(i) >= chains_.size()) return 0.0;
     return chains_[static_cast<size_t>(i)]->framer->codeword_error_rate();
+}
+
+bool Receiver::idle_pattern() const {
+    std::lock_guard<std::mutex> lk(gate_);
+    return pattern_.is_idle_pattern();
+}
+
+double Receiver::idle_pattern_rate() const {
+    std::lock_guard<std::mutex> lk(gate_);
+    return pattern_.pattern_rate();
+}
+
+double Receiver::idle_pattern_regularity() const {
+    std::lock_guard<std::mutex> lk(gate_);
+    return pattern_.regularity();
 }
 
 double Receiver::quality() const {

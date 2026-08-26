@@ -19,6 +19,7 @@
 
 #include "demod/fm_demod.h"
 #include "demod/fsk_chain.h"
+#include "demod/pattern_detector.h"
 #include "demod/types.h"
 #include "pocsag/framer.h"
 #include "pocsag/message.h"
@@ -91,6 +92,12 @@ public:
     double recovered_baud() const;    // Bd
     double timing_error() const;      // symbol periods
     double codeword_error_rate() const;
+
+    // Channel activity that is not POCSAG: many municipal transmitters idle
+    // with a continuous 1010… pattern between calls.
+    bool idle_pattern() const;
+    double idle_pattern_rate() const;      // bps implied by the pattern
+    double idle_pattern_regularity() const;
     // 0..1 reception quality, in the spirit of the reference decoder's
     // percentage readout: 1.0 means locked with no rejected codewords.
     double quality() const;
@@ -115,6 +122,7 @@ private:
 
     mutable std::mutex gate_;         // guards chains_ against reconfiguration
     demod::FmDemod fm_;
+    demod::PatternDetector pattern_;
     std::vector<std::unique_ptr<Chain>> chains_;
 
     BaudMode baud_mode_ = BaudMode::Auto;

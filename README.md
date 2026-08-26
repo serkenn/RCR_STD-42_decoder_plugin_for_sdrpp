@@ -128,6 +128,31 @@ also verifies the BCH decoder against every single- and double-bit error
 pattern, the sync/idle codewords against 図3.4-2 / 図3.4-5, and the numeric bit
 ordering against the worked "3681" example in 図3.4-4.
 
+### Replaying a capture
+
+`tests/replay.cpp` runs a baseband WAV recorded by the panel's **Record IQ**
+through the same receiver the plugin uses, which turns an off-air recording
+into a reproducible case:
+
+```sh
+c++ -std=c++17 -O2 -Isrc tests/replay.cpp src/demod/*.cpp src/pocsag/*.cpp -o build/replay
+build/replay ~/.config/sdrpp/rcr_std42/capture.wav
+```
+
+## What an idle channel looks like
+
+Municipal transmitters are not silent between calls. The Karatsu 283.5365 MHz
+site, for example, radiates a continuous 1010… idle pattern at 750 bps with
+±5 kHz deviation, and interrupts it for a ~1 s 1200 bps POCSAG burst roughly
+every 14 minutes carrying a date/time/weekday broadcast. So a healthy receiver
+sits with a strong signal and no frame sync almost all of the time.
+
+The panel says so explicitly rather than leaving it looking like a fault: when
+the crossing intervals are metronomic it reports **"Channel idle — N bps 1010
+pattern"** with a green lamp, and prints the measured rate. An idle rate that
+is not one of the POCSAG rates is expected — it is not what the calls are sent
+at.
+
 ## Releases
 
 GitHub Actions ([.github/workflows/build.yml](.github/workflows/build.yml)) runs
