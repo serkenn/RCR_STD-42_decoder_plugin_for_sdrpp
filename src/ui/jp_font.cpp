@@ -19,6 +19,12 @@ bool g_done = false;
 using CreateFontsTextureFn = bool (*)();
 using DestroyFontsTextureFn = void (*)();
 
+// First name that resolves in the already-loaded images wins.
+void* resolve(const char* mangled, const char* plain) {
+    if (void* p = ::dlsym(RTLD_DEFAULT, mangled)) return p;
+    return ::dlsym(RTLD_DEFAULT, plain);
+}
+
 } // namespace
 
 std::vector<std::string> default_candidates() {
@@ -49,10 +55,18 @@ void init(const std::string& preferred_path) {
     // Resolve the backend entry points before touching the atlas: if they are
     // missing there is no way to re-upload the texture, and adding a font
     // would corrupt the glyphs SDR++ already draws.
+    //
+    // imgui_impl_opengl3.cpp is compiled as C++ and its header does not wrap
+    // the declarations in extern "C", so sdrpp_core exports these under their
+    // Itanium-mangled names ("_Z36…v"). The mangling is identical on Mach-O and
+    // ELF, and dlsym() on macOS strips the leading underscore nm shows. The
+    // plain C spelling is tried as well, for a backend built with extern "C".
     auto destroy_tex = reinterpret_cast<DestroyFontsTextureFn>(
-        ::dlsym(RTLD_DEFAULT, "ImGui_ImplOpenGL3_DestroyFontsTexture"));
+        resolve("_Z37ImGui_ImplOpenGL3_DestroyFontsTexturev",
+                "ImGui_ImplOpenGL3_DestroyFontsTexture"));
     auto create_tex = reinterpret_cast<CreateFontsTextureFn>(
-        ::dlsym(RTLD_DEFAULT, "ImGui_ImplOpenGL3_CreateFontsTexture"));
+        resolve("_Z36ImGui_ImplOpenGL3_CreateFontsTexturev",
+                "ImGui_ImplOpenGL3_CreateFontsTexture"));
     if (!destroy_tex || !create_tex) {
         g_error = "ImGui OpenGL backend entry points not found; "
                   "Japanese text cannot be rendered in the panel.";
