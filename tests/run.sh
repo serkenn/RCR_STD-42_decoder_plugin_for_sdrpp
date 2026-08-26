@@ -13,6 +13,7 @@ mkdir -p "${ROOT}/build"
     "${ROOT}/src/demod/fsk_chain.cpp" \
     "${ROOT}/src/pocsag/bch.cpp" \
     "${ROOT}/src/pocsag/framer.cpp" \
+    "${ROOT}/src/pocsag/interpret.cpp" \
     "${ROOT}/src/pocsag/message.cpp" \
     "${ROOT}/src/pocsag/receiver.cpp" \
     "${ROOT}/src/pocsag/sjis.cpp" \

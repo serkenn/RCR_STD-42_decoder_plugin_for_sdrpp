@@ -110,6 +110,7 @@ struct CallRecord {
     double baud = 0.0;
     std::string format;
     std::string text;
+    std::string interpretation;
     int corrected_bits = 0;
     int bad_codewords = 0;
 };
@@ -255,6 +256,7 @@ private:
         r.baud = c.baud;
         r.format = std42::pocsag::to_string(c.format);
         r.text = c.text;
+        r.interpretation = c.interpretation;
         r.corrected_bits = c.corrected_bits;
         r.bad_codewords = c.bad_codewords;
 
@@ -492,6 +494,12 @@ private:
                                latest.bad_codewords);
         }
 
+        // A recognised layout is what the operator meant; the raw characters
+        // stay visible underneath so nothing is hidden behind a guess.
+        if (!latest.interpretation.empty()) {
+            ImGui::TextColored(ImVec4(0.44f, 0.78f, 0.53f, 1.0f), "%s",
+                               latest.interpretation.c_str());
+        }
         {
             std42::ui::jp_font::Scoped jp;
             ImGui::PushTextWrapPos(0.0f);
@@ -508,7 +516,8 @@ private:
             std42::ui::jp_font::Scoped jp;
             for (const auto& r : snapshot) {
                 ImGui::TextWrapped("[%u] %s", static_cast<unsigned>(r.address),
-                                   r.text.c_str());
+                                   r.interpretation.empty() ? r.text.c_str()
+                                                            : r.interpretation.c_str());
             }
             ImGui::TreePop();
         }

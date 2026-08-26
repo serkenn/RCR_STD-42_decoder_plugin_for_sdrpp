@@ -1,6 +1,7 @@
 #include "pocsag/receiver.h"
 
 #include "pocsag/bch.h"
+#include "pocsag/interpret.h"
 
 #include <algorithm>
 
@@ -117,6 +118,9 @@ void Receiver::on_raw_message(const RawMessage& m, size_t chain_index) {
     call.chars = d.chars;
     call.double_byte = d.double_byte;
     call.invalid = d.invalid;
+    if (call.format == Format::Numeric) {
+        call.interpretation = interpret_numeric(call.text);
+    }
 
     calls_.fetch_add(1, std::memory_order_relaxed);
     if (on_call_) on_call_(call);

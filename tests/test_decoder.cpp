@@ -13,6 +13,7 @@
 
 #include "pocsag/bch.h"
 #include "pocsag/framer.h"
+#include "pocsag/interpret.h"
 #include "pocsag/message.h"
 #include "pocsag/receiver.h"
 #include "pocsag/sjis.h"
@@ -363,6 +364,42 @@ void test_inverted_polarity() {
                                : " -> \"" + r.calls.front().text + "\""));
 }
 
+// The numeric payload layout observed on the Karatsu broadcast address. The
+// three positives are real off-air messages; the negatives check that the
+// weekday/date cross-check and the range checks keep an unrelated numeric page
+// from being labelled.
+void test_interpret_numeric() {
+    struct Case { const char* text; bool match; const char* what; };
+    const Case cases[] = {
+        {"00000001]30000826082700354****", true,  "off-air 2026-08-27 00:35 Thu"},
+        {"00000001]30000826082700494****", true,  "off-air 2026-08-27 00:49 Thu"},
+        {"00000001]30000826082701034****", true,  "off-air 2026-08-27 01:03 Thu"},
+        {"00000001]30000826082701035****", false, "weekday contradicts the date"},
+        {"00000001]30000826132701034****", false, "month 13"},
+        {"00000001]30000826083201034****", false, "day 32"},
+        {"00000001]30000826082725034****", false, "hour 25"},
+        {"00000001]30000826082701634****", false, "minute 63"},
+        {"00000001 30000826082701034****", false, "delimiter missing"},
+        {"12345678]90123456789012345678",  false, "digits, no valid date"},
+        {"0123456789",                     false, "too short"},
+        {"",                               false, "empty"},
+    };
+    bool all = true;
+    for (const Case& c : cases) {
+        const bool got = !pocsag::interpret_numeric(c.text).empty();
+        if (got != c.match) {
+            all = false;
+            check(false, std::string("interpret: ") + c.what);
+        }
+    }
+    if (all) check(true, "Numeric layout recognised, and not over-matched (" +
+                          std::to_string(sizeof(cases)/sizeof(cases[0])) + " cases)");
+
+    const std::string r = pocsag::interpret_numeric("00000001]30000826082701034****");
+    check(r == "Time broadcast: 2026-08-27 01:03 JST (Thu)",
+          "Interpretation text: \"" + r + "\"");
+}
+
 } // namespace
 
 int main() {
@@ -374,6 +411,7 @@ int main() {
 
     std::printf("\nMessage formats (§3.6)\n");
     test_numeric_example();
+    test_interpret_numeric();
 
     std::printf("\nEnd-to-end over synthetic RF\n");
     test_end_to_end("1200 bps, clean", 1200.0, pocsag::BaudMode::B1200, 0.0, 0.02, 1);

@@ -46,6 +46,9 @@ struct DecodedCall {
     Format format = Format::Numeric;
     KanjiByteOrder byte_order = KanjiByteOrder::Normal;
     std::string text;            // UTF-8
+    // Human reading of a recognised operator-specific layout; empty when the
+    // payload matches none. See pocsag/interpret.h.
+    std::string interpretation;
     int chars = 0;
     int double_byte = 0;
     int invalid = 0;

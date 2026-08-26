@@ -112,6 +112,7 @@ std::string serialize_call(const pocsag::DecodedCall& c, long long rx_time_ms) {
         append_str(out, "byte_order", pocsag::to_string(c.byte_order));
     }
     append_str(out, "text", c.text);
+    if (!c.interpretation.empty()) append_str(out, "interpretation", c.interpretation);
     append_num(out, "chars", c.chars);
     append_num(out, "double_byte", c.double_byte);
     append_num(out, "invalid", c.invalid);
@@ -139,6 +140,10 @@ std::string format_text_line(const pocsag::DecodedCall& c, long long rx_time_ms)
                   c.bad_codewords > 0 ? " [partial]" : "");
 
     std::string line(head);
+    if (!c.interpretation.empty()) {
+        line += c.interpretation;
+        line += "  | ";
+    }
     // Keep the record on one line so the log stays greppable.
     for (char ch : c.text) {
         if (ch == '\n' || ch == '\r') line += "\\n";

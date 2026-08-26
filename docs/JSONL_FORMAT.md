@@ -49,6 +49,7 @@ not rely on it.
 | `format`            | string  | yes     | Message format actually used: `"Numeric"`, `"Alphanumeric"` or `"Kanji"`. Never `"Auto"` — this is the resolved choice. |
 | `byte_order`        | string  | kanji   | `"Normal"` or `"Swapped"` — which Shift-JIS byte order decoded cleanly. Present **only when `format` is `"Kanji"`**. |
 | `text`              | string  | yes     | The decoded message as UTF-8. Empty for a tone-only page. |
+| `interpretation`    | string  | no      | Human reading of a recognised operator-specific numeric layout, e.g. `Time broadcast: 2026-08-27 01:03 JST (Thu)`. Omitted when the payload matches none — which is most of the time, since these layouts are local conventions rather than anything RCR STD-42 defines. `text` always carries the raw characters. |
 | `chars`             | number  | yes     | Characters produced by the decoder, including any replacement characters. |
 | `double_byte`       | number  | yes     | Of those, how many were double-byte Shift-JIS. Always 0 for the numeric and alphanumeric formats. |
 | `invalid`           | number  | yes     | Characters that could not be mapped and were emitted as U+FFFD. A non-zero value on an otherwise clean call usually means the wrong format or byte order was pinned manually. |
