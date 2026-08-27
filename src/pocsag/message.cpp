@@ -102,28 +102,43 @@ bool is_japanese_letter(uint32_t cp) {
     return (cp >= 0x3040 && cp <= 0x30FF)     // hiragana + katakana
         || (cp >= 0x4E00 && cp <= 0x9FFF)     // CJK unified ideographs
         || (cp >= 0xFF61 && cp <= 0xFF9F)     // half-width katakana
-        || cp == 0x3001 || cp == 0x3002       // 、 。
-        || cp == 0xFF01 || cp == 0xFF1F;      // ！ ？
+        || (cp >= 0xFF01 && cp <= 0xFF5E)     // full-width forms, incl. ０-９
+        || cp == 0x3000                       // ideographic space
+        || cp == 0x3001 || cp == 0x3002;      // 、 。
 }
 
 // Decodes forward from `start` until the stream stops looking like text.
-// The observed framing separates fields with NUL and TAB, so those terminate a
-// run rather than being decoded through.
+//
+// CR and LF are line breaks *inside* the message, not terminators: an
+// announcement arrives as several CRLF-separated lines, and treating the first
+// one as the end of the text threw away everything after the opening sentence.
+// NUL ends the text — that is what pads the payload out to the codeword
+// boundary.
 void decode_run(const std::vector<uint8_t>& b, size_t start,
-                std::string& out, int& letters) {
+                std::string& out, int& letters, int& other) {
     out.clear();
     letters = 0;
+    other = 0;
     size_t i = start;
     while (i < b.size()) {
         const uint8_t c = b[i];
-        if (c == 0x00 || c == 0x09 || c == 0x0A || c == 0x0D) break;
+        if (c == 0x00) break;
+        if (c == 0x0A || c == 0x0D) {
+            // Fold CRLF into one newline; a bare CR or LF becomes one too.
+            if (c == 0x0D && i + 1 < b.size() && b[i + 1] == 0x0A) ++i;
+            out.push_back('\n');
+            ++i;
+            continue;
+        }
+        if (c == 0x09) { out.push_back(' '); ++other; ++i; continue; }
         if (c >= 0x20 && c < 0x7F) {
             out.push_back(static_cast<char>(c));
+            ++other;
             ++i;
         } else if (c >= 0xA1 && c <= 0xDF) {
             const uint32_t cp = 0xFF61u + (c - 0xA1u);
             append_utf8(out, cp);
-            if (is_japanese_letter(cp)) ++letters;
+            if (is_japanese_letter(cp)) ++letters; else ++other;
             ++i;
         } else if (((c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC)) &&
                    i + 1 < b.size()) {
@@ -131,7 +146,7 @@ void decode_run(const std::vector<uint8_t>& b, size_t start,
                 sjis_lookup(static_cast<uint16_t>((c << 8) | b[i + 1]));
             if (ucs == 0) break;
             append_utf8(out, ucs);
-            if (is_japanese_letter(ucs)) ++letters;
+            if (is_japanese_letter(ucs)) ++letters; else ++other;
             i += 2;
         } else {
             break;
@@ -159,28 +174,54 @@ JapaneseRun find_japanese_run(const std::vector<uint8_t>& bytes,
     // that starts hundreds of bytes in is not what these messages look like.
     const size_t limit = std::min<size_t>(bytes.size(), 320);
 
+    double best_score = 0.0;
     auto consider = [&](const std::vector<uint8_t>& data, KanjiByteOrder o) {
         std::string text;
-        int letters = 0;
-        // Shift-JIS is two-byte aligned from the start of the text, so odd
-        // offsets cannot be the beginning of a character.
-        for (size_t off = 0; off < limit; off += 2) {
-            decode_run(data, off, text, letters);
-            if (text.empty() || letters <= best.letters) continue;
+        int letters = 0, other = 0;
+        // Every offset, not every other one. Shift-JIS is two-byte aligned
+        // relative to the start of the text, but the text does not start at an
+        // even offset within the payload — observed headers are 57 and 125
+        // bytes long. Scanning only even offsets landed one byte late and ate
+        // the first character of the announcement.
+        for (size_t off = 0; off < limit; ++off) {
+            decode_run(data, off, text, letters, other);
+            if (text.empty() || letters <= 0) continue;
             const int chars = utf8_length(text);
             if (chars <= 0) continue;
+            const double density =
+                static_cast<double>(letters) / (letters + other);
+            // Weighting length by density is what keeps the start from
+            // creeping backwards into the header: reading a few more bytes of
+            // binary as obscure kanji raises the letter count, but it costs
+            // more in density than it gains.
+            const double score = letters * density;
+            if (score <= best_score) continue;
+            best_score = score;
             best.text = text;
             best.letters = letters;
-            best.density = static_cast<double>(letters) / chars;
+            best.density = density;
             best.offset = static_cast<int>(off);
             best.order = o;
         }
+    };
+
+    // Trailing separators and padding are framing, not content.
+    auto trim = [](std::string& t) {
+        while (!t.empty()) {
+            const char c = t.back();
+            if (c == ' ' || c == '\n' || c == '\r' || c == '\t') t.pop_back();
+            else break;
+        }
+        size_t lead = 0;
+        while (lead < t.size() && (t[lead] == ' ' || t[lead] == '\n')) ++lead;
+        if (lead) t.erase(0, lead);
     };
 
     if (order != KanjiByteOrder::Swapped) consider(bytes, KanjiByteOrder::Normal);
     if (order != KanjiByteOrder::Normal) {
         consider(swap_pairs(bytes), KanjiByteOrder::Swapped);
     }
+    trim(best.text);
     return best;
 }
 

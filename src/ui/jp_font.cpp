@@ -67,9 +67,10 @@ void init(const std::string& preferred_path) {
     // next start — where postInit really does run before the loop — succeeds.
     const ImGuiContext* ctx = ImGui::GetCurrentContext();
     if (ctx != nullptr && ctx->WithinFrameScope) {
-        g_error = "Japanese font not loaded: the font atlas cannot be rebuilt "
-                  "while a frame is being drawn. Restart SDR++ with this module "
-                  "enabled and it will load at start-up.";
+        g_error = "Japanese font loads at start-up. This instance was added "
+                  "while SDR++ was running, so the panel shows boxes instead of "
+                  "Japanese until the next restart. Decoding and file/TCP output "
+                  "are unaffected.";
         return;
     }
 

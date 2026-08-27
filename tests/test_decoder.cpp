@@ -438,6 +438,51 @@ void test_real_announcement() {
     check(d.text == expect, "Off-air announcement: text matches\n         got: " + d.text);
 }
 
+// A second real recording: a municipal event announcement, several
+// CRLF-separated lines behind a one-byte prefix. Treating CR/LF as a
+// terminator used to return only the last line, and scanning even offsets only
+// used to land one byte late and eat the first character of it.
+void test_real_multiline_announcement() {
+    static const char* kHex =
+        "828e8251935696fa97d8936a82fa81c98e418eb5905291a28ae38cd497f081ac8e40"
+        "93ba83e08379835e8393914e89e582ef8af08d4a82c382b582dc81b70d428e0a9196"
+        "824f82c990a88d5c829e82dd82a282bd82be82a291bd8e4982e88acc824682b382f1"
+        "81cd8c418cdf82e38e50829e8252954f82aa82a981e78e4095f382748df0827382a2"
+        "82dc82b782cc81c50d418e0a8eb58c5296f68aaf82d982c98fb28d57828782ad82be"
+        "82b381a20d42910a8e4982e88acc824682b382f181cd8941935e82ae82aa82c582ab"
+        "95e9919e829581c58e4193ba83e083568185835b825988c682f995dd82a896f08259"
+        "82ea82c882a282e682a481c90d41820a8eb28e9d825182ad82be82b381a20d42090a";
+
+    std::vector<uint8_t> bytes;
+    for (const char* p = kHex; p[0] && p[1]; p += 2) {
+        bytes.push_back(static_cast<uint8_t>(
+            std::stoul(std::string(p, 2), nullptr, 16)));
+    }
+    std::vector<uint8_t> bits;
+    for (uint8_t b : bytes) {
+        for (int k = 0; k < 8; ++k) bits.push_back((b >> k) & 1u);
+    }
+
+    const pocsag::DecodedText d =
+        pocsag::decode_message(bits, pocsag::Format::Auto,
+                               pocsag::KanjiByteOrder::Auto);
+
+    check(d.format == pocsag::Format::Kanji, "Multi-line announcement: read as Kanji");
+    check(d.invalid == 0, "Multi-line announcement: no unmappable characters");
+    // Five lines, not just the last one.
+    int lines = 1;
+    for (char c : d.text) if (c == '\n') ++lines;
+    check(lines == 5, "Multi-line announcement: all 5 lines kept (got " +
+                      std::to_string(lines) + ")");
+    // The line that used to arrive with its first character eaten.
+    check(d.text.find("選手の皆さんは、運動ができる服装で、") != std::string::npos,
+          "Multi-line announcement: no character lost at a line start");
+    check(d.text.find("事前にお申込みいただいた選手の皆さんは、") != std::string::npos,
+          "Multi-line announcement: interior line intact");
+    check(d.text.find("ご持参ください。") != std::string::npos,
+          "Multi-line announcement: final line reached");
+}
+
 } // namespace
 
 int main() {
@@ -451,6 +496,7 @@ int main() {
     test_numeric_example();
     test_interpret_numeric();
     test_real_announcement();
+    test_real_multiline_announcement();
 
     std::printf("\nEnd-to-end over synthetic RF\n");
     test_end_to_end("1200 bps, clean", 1200.0, pocsag::BaudMode::B1200, 0.0, 0.02, 1);

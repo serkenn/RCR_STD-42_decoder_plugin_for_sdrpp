@@ -658,14 +658,13 @@ private:
             ImGui::TextDisabled("loaded: %s",
                                 std42::ui::jp_font::loaded_path().c_str());
         } else {
+            // Not an error in the usual case: adding the module at runtime
+            // simply defers the font to the next start.
             ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextColored(ImVec4(0.86f, 0.67f, 0.16f, 1.0f), "%s",
-                               std42::ui::jp_font::error().c_str());
+            ImGui::TextDisabled("%s", std42::ui::jp_font::error().c_str());
             ImGui::PopTextWrapPos();
         }
         ImGui::TextDisabled("Font changes apply at the next SDR++ start.");
-        ImGui::TextDisabled("So does the font itself when this module is added "
-                            "at runtime rather than being enabled at start-up.");
     }
 
     // ── Members ───────────────────────────────────────────────────────────
