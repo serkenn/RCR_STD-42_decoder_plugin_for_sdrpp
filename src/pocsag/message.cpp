@@ -9,8 +9,27 @@ namespace std42::pocsag {
 // 0-9, 予備, U (緊急表示), 空白, ハイフン, ']', '['  — 図3.6-1.
 const char kNumericChars[17] = "0123456789*U -][";
 
+double numeric_special_fraction(const std::string& text) {
+    // Trailing 予備 and space codes are how a message is padded out to the
+    // codeword boundary, so they say nothing about the content. Counting them
+    // put the time broadcast — "…01034****", five specials in thirty
+    // characters — over the threshold and had it reported as binary.
+    size_t end = text.size();
+    while (end > 0 && (text[end - 1] == '*' || text[end - 1] == ' ')) --end;
+
+    int total = 0, special = 0;
+    for (size_t i = 0; i < end; ++i) {
+        const char c = text[i];
+        if (c == ' ') continue;                 // interior padding
+        ++total;
+        if (c == '*' || c == 'U' || c == '-' || c == ']' || c == '[') ++special;
+    }
+    return total > 0 ? static_cast<double>(special) / total : 0.0;
+}
+
 const char* to_string(Format f) {
     switch (f) {
+        case Format::Binary:       return "Binary";
         case Format::Numeric:      return "Numeric";
         case Format::Alphanumeric: return "Alphanumeric";
         case Format::Kanji:        return "Kanji";
@@ -330,12 +349,25 @@ DecodedText decode_message(const std::vector<uint8_t>& bits,
     }
 
     const DecodedText alpha = decode_alphanumeric(bits);
-    if (alpha.chars > 0 && alpha.invalid == 0) return alpha;
+    // A clean reading of one or two characters out of a large payload is the
+    // ETX terminator landing early in binary data, not a short page.
+    if (alpha.chars >= kMinFallbackChars && alpha.invalid == 0) return alpha;
 
-    const DecodedText numeric = decode_numeric(bits);
+    DecodedText numeric = decode_numeric(bits);
     // Fall back to whichever reading has fewer unmappable characters.
     if (alpha.chars > 0 && score(alpha) < score(kanji)) return alpha;
-    if (kanji.chars > 0 && kanji.invalid * 4 <= kanji.chars) return kanji;
+    if (kanji.chars >= kMinFallbackChars && kanji.invalid == 0) return kanji;
+
+    // Last resort. The numeric table maps every code, so reaching here does
+    // not mean the payload is numeric — only that nothing else fitted. Say so
+    // rather than handing back a digit string that reads like a message.
+    if (numeric.chars >= kNumericMinCharsToJudge &&
+        numeric_special_fraction(numeric.text) > kNumericMaxSpecialFraction) {
+        DecodedText d;
+        d.format = Format::Binary;
+        d.chars = numeric.chars;
+        return d;
+    }
     return numeric;
 }
 

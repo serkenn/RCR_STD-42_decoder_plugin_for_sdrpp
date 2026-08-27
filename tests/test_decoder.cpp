@@ -483,6 +483,48 @@ void test_real_multiline_announcement() {
           "Multi-line announcement: final line reached");
 }
 
+// A payload with no readable content, recorded from the same address as the
+// announcements. The numeric table maps all sixteen of its codes, so this used
+// to be reported as a 225-character "message" of digits and brackets. It is
+// 112 bytes of structured data — four repeating 22-byte records — and no
+// arrangement of byte order, bit shift or offset yields Japanese.
+void test_binary_payload_not_reported_as_text() {
+    static const char* kHex =
+        "40c00b020801182c0010130303c3011114e8d1513688357836a85f79192993002303"
+        "01132ba82ed82c583688357836a85f7919592c782b2814182ba82ed82c5836883578"
+        "36a85f7919592c782b2814182ba82e582c583688357836a85f7919092f98f4d82e88"
+        "2ec82d782b2814089000";
+
+    std::vector<uint8_t> bytes;
+    for (const char* p = kHex; p[0] && p[1]; p += 2) {
+        bytes.push_back(static_cast<uint8_t>(
+            std::stoul(std::string(p, 2), nullptr, 16)));
+    }
+    std::vector<uint8_t> bits;
+    for (uint8_t b : bytes) {
+        for (int k = 0; k < 8; ++k) bits.push_back((b >> k) & 1u);
+    }
+    const pocsag::DecodedText d =
+        pocsag::decode_message(bits, pocsag::Format::Auto,
+                               pocsag::KanjiByteOrder::Auto);
+    check(d.format == pocsag::Format::Binary,
+          std::string("Unreadable payload: reported as Binary, not as text (got ") +
+          pocsag::to_string(d.format) + ")");
+    check(d.text.empty(), "Unreadable payload: no fabricated text");
+
+    // And the discriminator must not catch a genuine numeric message. The time
+    // broadcast's trailing 予備 padding is not content.
+    check(pocsag::numeric_special_fraction("00000001]30000826082701034****") <
+              pocsag::kNumericMaxSpecialFraction,
+          "Time broadcast stays below the binary threshold");
+    const pocsag::DecodedText forced =
+        pocsag::decode_message(bits, pocsag::Format::Numeric,
+                               pocsag::KanjiByteOrder::Auto);
+    check(pocsag::numeric_special_fraction(forced.text) >
+              pocsag::kNumericMaxSpecialFraction,
+          "Unreadable payload stays above it");
+}
+
 } // namespace
 
 int main() {
@@ -497,6 +539,7 @@ int main() {
     test_interpret_numeric();
     test_real_announcement();
     test_real_multiline_announcement();
+    test_binary_payload_not_reported_as_text();
 
     std::printf("\nEnd-to-end over synthetic RF\n");
     test_end_to_end("1200 bps, clean", 1200.0, pocsag::BaudMode::B1200, 0.0, 0.02, 1);

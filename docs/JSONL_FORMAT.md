@@ -46,7 +46,7 @@ not rely on it.
 | `frame`             | number  | yes     | Frame 0–7 the address codeword occupied. Equals `address & 7`. |
 | `baud`              | number  | yes     | Bit rate the call was decoded at: `512`, `1200` or `2400`. |
 | `inverted`          | boolean | yes     | `true` if the sync codeword matched the complement, i.e. the signal path inverts polarity. |
-| `format`            | string  | yes     | Message format actually used: `"Numeric"`, `"Alphanumeric"` or `"Kanji"`. Never `"Auto"` — this is the resolved choice. |
+| `format`            | string  | yes     | Message format actually used: `"Numeric"`, `"Alphanumeric"`, `"Kanji"`, or `"Binary"`. Never `"Auto"` — this is the resolved choice. `"Binary"` means the payload read as none of the STD-42 formats: the numeric table maps all sixteen of its codes, so it would otherwise render any payload as a digit string that looks like a message. `text` is empty in that case; `raw_hex` carries the payload. |
 | `byte_order`        | string  | kanji   | `"Normal"` or `"Swapped"` — which Shift-JIS byte order decoded cleanly. Present **only when `format` is `"Kanji"`**. |
 | `text`              | string  | yes     | The decoded message as UTF-8. Empty for a tone-only page. |
 | `interpretation`    | string  | no      | Human reading of a recognised operator-specific numeric layout, e.g. `Time broadcast: 2026-08-27 01:03 JST (Thu)`. Omitted when the payload matches none — which is most of the time, since these layouts are local conventions rather than anything RCR STD-42 defines. `text` always carries the raw characters. |

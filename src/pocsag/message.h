@@ -17,7 +17,11 @@
 
 namespace std42::pocsag {
 
-enum class Format { Auto, Numeric, Alphanumeric, Kanji };
+// Binary is not one of STD-42's message formats. It is what this decoder
+// reports when a payload reads as none of them: the numeric format maps all 16
+// of its codes, so it never fails outright and will render any payload as a
+// digit string, which looks like a decoded message and is not one.
+enum class Format { Auto, Numeric, Alphanumeric, Kanji, Binary };
 
 // §3.6.3 says the kanji format transmits a *16-bit* code LSB first, which puts
 // the Shift-JIS trailing byte on the wire before the leading byte. Deployed
@@ -67,6 +71,23 @@ JapaneseRun find_japanese_run(const std::vector<uint8_t>& bytes,
 // 0.71 — so these sit in a wide gap rather than on a boundary.
 inline constexpr int kJapaneseRunMinLetters = 12;
 inline constexpr double kJapaneseRunMinDensity = 0.5;
+
+// Ten of the sixteen numeric codes are digits; the rest are 予備 (reserved), U,
+// space, hyphen and the two brackets (図3.6-1). Genuine numeric traffic uses
+// those sparingly as delimiters, while a binary payload pushed through the
+// table hits them at close to their share of the alphabet. Measured over 80
+// off-air messages the two populations do not overlap: real ones ran 0.038 to
+// 0.109, payloads with no readable content 0.133 to 0.233.
+inline constexpr double kNumericMaxSpecialFraction = 0.12;
+// Below this many characters the fraction is too noisy to judge; the shortest
+// genuine numeric message observed is 30.
+inline constexpr int kNumericMinCharsToJudge = 24;
+
+// A fallback reading shorter than this is noise, not a short message.
+inline constexpr int kMinFallbackChars = 4;
+
+// Fraction of `text` made up of the non-digit numeric codes.
+double numeric_special_fraction(const std::string& text);
 
 // §3.6.1 図3.6-1: 4-bit code → displayed character. Index 10 is 予備
 // (reserved) and is rendered as '*'.

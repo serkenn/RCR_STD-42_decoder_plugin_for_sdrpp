@@ -111,6 +111,7 @@ struct CallRecord {
     std::string format;
     std::string text;
     std::string interpretation;
+    int payload_bytes = 0;
     int corrected_bits = 0;
     int bad_codewords = 0;
 };
@@ -257,6 +258,7 @@ private:
         r.format = std42::pocsag::to_string(c.format);
         r.text = c.text;
         r.interpretation = c.interpretation;
+        r.payload_bytes = static_cast<int>(c.raw_bytes.size());
         r.corrected_bits = c.corrected_bits;
         r.bad_codewords = c.bad_codewords;
 
@@ -496,6 +498,10 @@ private:
 
         // A recognised layout is what the operator meant; the raw characters
         // stay visible underneath so nothing is hidden behind a guess.
+        if (latest.format == "Binary") {
+            ImGui::TextDisabled("%d bytes of data, not a text message",
+                                latest.payload_bytes);
+        }
         if (!latest.interpretation.empty()) {
             ImGui::TextColored(ImVec4(0.44f, 0.78f, 0.53f, 1.0f), "%s",
                                latest.interpretation.c_str());

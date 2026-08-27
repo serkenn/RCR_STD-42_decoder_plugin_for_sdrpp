@@ -141,6 +141,12 @@ std::string format_text_line(const pocsag::DecodedCall& c, long long rx_time_ms)
                   c.bad_codewords > 0 ? " [partial]" : "");
 
     std::string line(head);
+    if (c.format == pocsag::Format::Binary) {
+        char n[48];
+        std::snprintf(n, sizeof(n), "%zu bytes of data (see raw_hex)",
+                      c.raw_bytes.size());
+        return line + n;
+    }
     if (!c.interpretation.empty()) {
         line += c.interpretation;
         line += "  | ";
