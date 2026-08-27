@@ -52,6 +52,8 @@ struct DecodedCall {
     int chars = 0;
     int double_byte = 0;
     int invalid = 0;
+    // Binary prefix skipped to reach the text, in bytes; 0 for a plain message.
+    int header_bytes = 0;
 
     // ── Quality ───────────────────────────────────────────────────────────
     int message_codewords = 0;

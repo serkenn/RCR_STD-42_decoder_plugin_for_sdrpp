@@ -2,6 +2,8 @@
 
 #include "pocsag/sjis.h"
 
+#include <algorithm>
+
 namespace std42::pocsag {
 
 // 0-9, 予備, U (緊急表示), 空白, ハイフン, ']', '['  — 図3.6-1.
@@ -51,6 +53,15 @@ std::vector<uint8_t> bits_to_bytes(const std::vector<uint8_t>& bits) {
 
 namespace {
 
+std::vector<uint8_t> swap_pairs(std::vector<uint8_t> v) {
+    for (size_t i = 0; i + 1 < v.size(); i += 2) {
+        const uint8_t t = v[i];
+        v[i] = v[i + 1];
+        v[i + 1] = t;
+    }
+    return v;
+}
+
 // Messages are padded out to the codeword boundary. Numeric pads with spaces
 // (§3.6.1); text formats are padded with NUL or spaces and frequently carry an
 // explicit ETX terminator, so the tail is trimmed before display.
@@ -72,15 +83,6 @@ void cut_at_terminator(std::vector<uint8_t>& bytes) {
     }
 }
 
-std::vector<uint8_t> swap_pairs(std::vector<uint8_t> v) {
-    for (size_t i = 0; i + 1 < v.size(); i += 2) {
-        const uint8_t t = v[i];
-        v[i] = v[i + 1];
-        v[i + 1] = t;
-    }
-    return v;
-}
-
 // Lower is better: unmappable characters dominate, then a mild preference for
 // results that actually produced double-byte characters.
 double score(const DecodedText& d) {
@@ -90,6 +92,97 @@ double score(const DecodedText& d) {
 }
 
 } // namespace
+
+namespace {
+
+// Kana, kanji and the punctuation that goes with them. Latin letters and
+// digits deliberately do not count: they occur just as readily in mojibake, so
+// only the marks that indicate genuine Japanese prose are scored.
+bool is_japanese_letter(uint32_t cp) {
+    return (cp >= 0x3040 && cp <= 0x30FF)     // hiragana + katakana
+        || (cp >= 0x4E00 && cp <= 0x9FFF)     // CJK unified ideographs
+        || (cp >= 0xFF61 && cp <= 0xFF9F)     // half-width katakana
+        || cp == 0x3001 || cp == 0x3002       // 、 。
+        || cp == 0xFF01 || cp == 0xFF1F;      // ！ ？
+}
+
+// Decodes forward from `start` until the stream stops looking like text.
+// The observed framing separates fields with NUL and TAB, so those terminate a
+// run rather than being decoded through.
+void decode_run(const std::vector<uint8_t>& b, size_t start,
+                std::string& out, int& letters) {
+    out.clear();
+    letters = 0;
+    size_t i = start;
+    while (i < b.size()) {
+        const uint8_t c = b[i];
+        if (c == 0x00 || c == 0x09 || c == 0x0A || c == 0x0D) break;
+        if (c >= 0x20 && c < 0x7F) {
+            out.push_back(static_cast<char>(c));
+            ++i;
+        } else if (c >= 0xA1 && c <= 0xDF) {
+            const uint32_t cp = 0xFF61u + (c - 0xA1u);
+            append_utf8(out, cp);
+            if (is_japanese_letter(cp)) ++letters;
+            ++i;
+        } else if (((c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC)) &&
+                   i + 1 < b.size()) {
+            const uint16_t ucs =
+                sjis_lookup(static_cast<uint16_t>((c << 8) | b[i + 1]));
+            if (ucs == 0) break;
+            append_utf8(out, ucs);
+            if (is_japanese_letter(ucs)) ++letters;
+            i += 2;
+        } else {
+            break;
+        }
+    }
+}
+
+// Counts characters, not bytes, so density compares like with like.
+int utf8_length(const std::string& s) {
+    int n = 0;
+    for (unsigned char c : s) {
+        if ((c & 0xC0) != 0x80) ++n;
+    }
+    return n;
+}
+
+} // namespace
+
+JapaneseRun find_japanese_run(const std::vector<uint8_t>& bytes,
+                              KanjiByteOrder order) {
+    JapaneseRun best;
+    if (bytes.size() < 4) return best;
+
+    // Scanning the whole payload would be wasteful and pointless: a text body
+    // that starts hundreds of bytes in is not what these messages look like.
+    const size_t limit = std::min<size_t>(bytes.size(), 320);
+
+    auto consider = [&](const std::vector<uint8_t>& data, KanjiByteOrder o) {
+        std::string text;
+        int letters = 0;
+        // Shift-JIS is two-byte aligned from the start of the text, so odd
+        // offsets cannot be the beginning of a character.
+        for (size_t off = 0; off < limit; off += 2) {
+            decode_run(data, off, text, letters);
+            if (text.empty() || letters <= best.letters) continue;
+            const int chars = utf8_length(text);
+            if (chars <= 0) continue;
+            best.text = text;
+            best.letters = letters;
+            best.density = static_cast<double>(letters) / chars;
+            best.offset = static_cast<int>(off);
+            best.order = o;
+        }
+    };
+
+    if (order != KanjiByteOrder::Swapped) consider(bytes, KanjiByteOrder::Normal);
+    if (order != KanjiByteOrder::Normal) {
+        consider(swap_pairs(bytes), KanjiByteOrder::Swapped);
+    }
+    return best;
+}
 
 DecodedText decode_numeric(const std::vector<uint8_t>& bits) {
     DecodedText d;
@@ -158,13 +251,33 @@ DecodedText decode_kanji(const std::vector<uint8_t>& bits, KanjiByteOrder order)
 DecodedText decode_message(const std::vector<uint8_t>& bits,
                            Format want,
                            KanjiByteOrder order) {
-    switch (want) {
-        case Format::Numeric:      return decode_numeric(bits);
-        case Format::Alphanumeric: return decode_alphanumeric(bits);
-        case Format::Kanji:        return decode_kanji(bits, order);
-        case Format::Auto:
-        default:                   break;
+    if (want == Format::Numeric) return decode_numeric(bits);
+    if (want == Format::Alphanumeric) return decode_alphanumeric(bits);
+
+    // Kanji, or Auto: look for a run of real Japanese anywhere in the payload
+    // first. Decoding from byte 0 works only when the message is text all the
+    // way through, and municipal announcements are not — they arrive behind a
+    // binary header, which turns the whole reading to mojibake and leaves the
+    // announcement itself half-visible at best.
+    {
+        const std::vector<uint8_t> bytes = bits_to_bytes(bits);
+        const JapaneseRun run = find_japanese_run(bytes, order);
+        if (run.letters >= kJapaneseRunMinLetters &&
+            run.density >= kJapaneseRunMinDensity) {
+            DecodedText d;
+            d.format = Format::Kanji;
+            d.byte_order = run.order;
+            d.text = run.text;
+            d.header_bytes = run.offset;
+            for (unsigned char c : d.text) {
+                if ((c & 0xC0) != 0x80) ++d.chars;
+                if ((c & 0xF0) == 0xE0) ++d.double_byte;
+            }
+            return d;
+        }
     }
+
+    if (want == Format::Kanji) return decode_kanji(bits, order);
 
     // Auto. Shift-JIS is an ASCII superset, so a message that decodes cleanly
     // under both only counts as kanji when it actually contains a double-byte

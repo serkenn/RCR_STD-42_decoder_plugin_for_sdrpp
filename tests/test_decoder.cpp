@@ -400,6 +400,44 @@ void test_interpret_numeric() {
           "Interpretation text: \"" + r + "\"");
 }
 
+// A real off-air announcement, recorded from a Karatsu municipal transmitter.
+// The payload carries a 28-byte binary header before the Shift-JIS body, and
+// the body uses the swapped byte order of §3.6.3. Decoding from byte 0 —
+// which is what the plugin used to do — produced the header as mojibake and
+// only recovered part of the text; the run finder returns it intact.
+void test_real_announcement() {
+    static const char* kHex =
+        "4020102e0801602c0010301ce0d1513688357836a85f791929321030b182ea82cd82"
+        "658358836783fa959791c582b7824281b182ea82cd82658358836783fa959791c582"
+        "b7824281b182ea82c582658358836783fa959791f082498fed82e882dc82b7824281"
+        "000900";
+
+    std::vector<uint8_t> bytes;
+    for (const char* p = kHex; p[0] && p[1]; p += 2) {
+        bytes.push_back(static_cast<uint8_t>(
+            std::stoul(std::string(p, 2), nullptr, 16)));
+    }
+    std::vector<uint8_t> bits;
+    for (uint8_t b : bytes) {
+        for (int k = 0; k < 8; ++k) bits.push_back((b >> k) & 1u);
+    }
+
+    const pocsag::DecodedText d =
+        pocsag::decode_message(bits, pocsag::Format::Auto,
+                               pocsag::KanjiByteOrder::Auto);
+    const std::string expect =
+        "これはテスト放送です。これはテスト放送です。これでテスト放送を終わります。";
+
+    check(d.format == pocsag::Format::Kanji, "Off-air announcement: read as Kanji");
+    check(d.byte_order == pocsag::KanjiByteOrder::Swapped,
+          "Off-air announcement: swapped byte order detected");
+    check(d.header_bytes == 28, "Off-air announcement: 28-byte header skipped (got " +
+                                std::to_string(d.header_bytes) + ")");
+    check(d.invalid == 0, "Off-air announcement: no unmappable characters (got " +
+                          std::to_string(d.invalid) + ")");
+    check(d.text == expect, "Off-air announcement: text matches\n         got: " + d.text);
+}
+
 } // namespace
 
 int main() {
@@ -412,6 +450,7 @@ int main() {
     std::printf("\nMessage formats (§3.6)\n");
     test_numeric_example();
     test_interpret_numeric();
+    test_real_announcement();
 
     std::printf("\nEnd-to-end over synthetic RF\n");
     test_end_to_end("1200 bps, clean", 1200.0, pocsag::BaudMode::B1200, 0.0, 0.02, 1);

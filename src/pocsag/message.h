@@ -36,7 +36,37 @@ struct DecodedText {
     int chars = 0;
     int double_byte = 0;
     int invalid = 0;          // unmappable characters
+    // Bytes of binary prefix skipped to reach the text, when the payload was
+    // not text from its first byte. 0 for an ordinary message.
+    int header_bytes = 0;
 };
+
+// A run of real Japanese found inside a payload.
+//
+// Municipal traffic does not always put text at byte 0. Observed broadcasts
+// from a Karatsu address carry a 28-byte binary header, a short title, and
+// then the announcement, so decoding the payload from the start yields the
+// header as mojibake and only stumbles into the text once the byte alignment
+// happens to come right. Locating the text directly recovers it intact.
+struct JapaneseRun {
+    std::string text;
+    int letters = 0;                 // kana + kanji, the marker of real prose
+    double density = 0.0;            // letters per character
+    int offset = 0;                  // byte offset the run started at
+    KanjiByteOrder order = KanjiByteOrder::Normal;
+};
+
+// Best run over both byte orders and every 2-byte-aligned offset. `order`
+// restricts the search when it is not Auto.
+JapaneseRun find_japanese_run(const std::vector<uint8_t>& bytes,
+                              KanjiByteOrder order = KanjiByteOrder::Auto);
+
+// A run must clear both to be believed. Measured against 76 off-air messages,
+// the two that genuinely carried an announcement scored 37 letters at density
+// 1.00, while the best coincidental run in the other 74 reached 9 letters at
+// 0.71 — so these sit in a wide gap rather than on a boundary.
+inline constexpr int kJapaneseRunMinLetters = 12;
+inline constexpr double kJapaneseRunMinDensity = 0.5;
 
 // §3.6.1 図3.6-1: 4-bit code → displayed character. Index 10 is 予備
 // (reserved) and is rendered as '*'.

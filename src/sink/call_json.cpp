@@ -116,6 +116,7 @@ std::string serialize_call(const pocsag::DecodedCall& c, long long rx_time_ms) {
     append_num(out, "chars", c.chars);
     append_num(out, "double_byte", c.double_byte);
     append_num(out, "invalid", c.invalid);
+    if (c.header_bytes > 0) append_num(out, "header_bytes", c.header_bytes);
 
     append_num(out, "message_codewords", c.message_codewords);
     append_num(out, "corrected_bits", c.corrected_bits);

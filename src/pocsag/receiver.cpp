@@ -118,6 +118,7 @@ void Receiver::on_raw_message(const RawMessage& m, size_t chain_index) {
     call.chars = d.chars;
     call.double_byte = d.double_byte;
     call.invalid = d.invalid;
+    call.header_bytes = d.header_bytes;
     if (call.format == Format::Numeric) {
         call.interpretation = interpret_numeric(call.text);
     }

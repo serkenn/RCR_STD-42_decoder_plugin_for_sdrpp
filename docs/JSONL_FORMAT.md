@@ -52,6 +52,7 @@ not rely on it.
 | `interpretation`    | string  | no      | Human reading of a recognised operator-specific numeric layout, e.g. `Time broadcast: 2026-08-27 01:03 JST (Thu)`. Omitted when the payload matches none — which is most of the time, since these layouts are local conventions rather than anything RCR STD-42 defines. `text` always carries the raw characters. |
 | `chars`             | number  | yes     | Characters produced by the decoder, including any replacement characters. |
 | `double_byte`       | number  | yes     | Of those, how many were double-byte Shift-JIS. Always 0 for the numeric and alphanumeric formats. |
+| `header_bytes`      | number  | no      | Bytes of binary prefix skipped to reach the text. Present only when the payload was not text from its first byte — municipal announcements arrive behind a binary header. `raw_hex` still carries the whole payload, header included. |
 | `invalid`           | number  | yes     | Characters that could not be mapped and were emitted as U+FFFD. A non-zero value on an otherwise clean call usually means the wrong format or byte order was pinned manually. |
 | `message_codewords` | number  | yes     | Message codewords accepted for this call. |
 | `corrected_bits`    | number  | yes     | Total bits repaired by BCH across the call's codewords. A rising value is the earliest sign of a marginal signal. |
