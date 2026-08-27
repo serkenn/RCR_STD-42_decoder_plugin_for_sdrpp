@@ -1,6 +1,7 @@
 #include "ui/jp_font.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <gui/style.h>
 
 #include <dlfcn.h>
@@ -50,6 +51,28 @@ std::vector<std::string> default_candidates() {
 
 void init(const std::string& preferred_path) {
     if (g_done) return;
+
+    // Rebuilding the atlas destroys the texture the current frame's draw
+    // commands already reference, so it is only safe between frames.
+    //
+    // postInit() is not always called between frames. SDR++ runs it once at
+    // the end of MainWindow::init(), before the render loop — but the Module
+    // Manager's "+" button also calls it, from inside its own menu draw
+    // handler (core/src/gui/menus/module_manager.cpp), which is several frames
+    // deep. Adding an instance at runtime therefore reached this code
+    // mid-frame and took SDR++ down with it, while a plugin already present at
+    // start-up was fine.
+    //
+    // When that happens, leave the atlas alone and leave g_done clear so the
+    // next start — where postInit really does run before the loop — succeeds.
+    const ImGuiContext* ctx = ImGui::GetCurrentContext();
+    if (ctx != nullptr && ctx->WithinFrameScope) {
+        g_error = "Japanese font not loaded: the font atlas cannot be rebuilt "
+                  "while a frame is being drawn. Restart SDR++ with this module "
+                  "enabled and it will load at start-up.";
+        return;
+    }
+
     g_done = true;
 
     // Resolve the backend entry points before touching the atlas: if they are

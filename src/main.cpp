@@ -664,6 +664,8 @@ private:
             ImGui::PopTextWrapPos();
         }
         ImGui::TextDisabled("Font changes apply at the next SDR++ start.");
+        ImGui::TextDisabled("So does the font itself when this module is added "
+                            "at runtime rather than being enabled at start-up.");
     }
 
     // ── Members ───────────────────────────────────────────────────────────
